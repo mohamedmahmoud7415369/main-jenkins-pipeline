@@ -1,0 +1,196 @@
+pipeline {
+    agent {
+        label 'agent-0' 
+    }
+
+    parameters {
+        string(name: 'IMAGE_NAME', defaultValue: 'java-app', description: 'Docker image name base')
+        string(name: 'IMAGE_TAG', defaultValue: "2.0.${env.BUILD_NUMBER}", description: 'Docker image tag')
+        string(name: 'DOCKER_REGISTRY', defaultValue: 'declatitive_pipeline', description: 'Docker registry')
+        string(name: 'REGISTRY_NAMESPACE', defaultValue: 'mooomoo7415369', description: 'Docker namespace')
+        string(name: 'DOCKER_CREDS_ID', defaultValue: 'my-docker-creds', description: 'Docker credentials ID')
+        booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip running tests')
+        booleanParam(name: 'PUSH_IMAGE', defaultValue: true, description: 'Push image to registry')
+        choice(name: 'BUILD_TYPE', choices: ['full', 'quick'], description: 'Build type')
+        choice(name: 'DEPLOY_ENV', choices: ['dev', 'stage', 'prod'], description: 'Deployment environment')
+    }
+
+    environment {
+        DOCKER_IMAGE_A = "${params.REGISTRY_NAMESPACE}/${params.IMAGE_NAME}-a"
+        DOCKER_IMAGE_B = "${params.REGISTRY_NAMESPACE}/${params.IMAGE_NAME}-b"
+        DOCKER_IMAGE_A_FULL = "${params.REGISTRY_NAMESPACE}/${params.IMAGE_NAME}-a:${params.IMAGE_TAG}"
+        DOCKER_IMAGE_B_FULL = "${params.REGISTRY_NAMESPACE}/${params.IMAGE_NAME}-b:${params.IMAGE_TAG}"
+    }
+
+    stages {
+        stage('Checkout Source') {
+            steps {
+                // Checkout your application code
+                git(
+                    url: 'https://github.com/mohamedmahmoud7415369/main-jenkins-pipeline.git',
+                    credentialsId: 'my-docker-creds', // Replace with your credentials
+                    branch: 'main'
+                )
+            }
+        }
+
+        stage('Verify Dockerfile') {
+            steps {
+                script {
+                    // Check if Dockerfile exists in service directories
+                    def dockerfileA = fileExists 'service-a/Dockerfile'
+                    def dockerfileB = fileExists 'service-b/Dockerfile'
+                    
+                    if (!dockerfileA) {
+                        echo "Creating Dockerfile for service-a"
+                        writeFile file: 'service-a/Dockerfile', text: """
+FROM openjdk:11-jre-slim
+WORKDIR /app
+COPY target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                    }
+                    
+                    if (!dockerfileB) {
+                        echo "Creating Dockerfile for service-b"
+                        writeFile file: 'service-b/Dockerfile', text: """
+FROM openjdk:11-jre-slim
+WORKDIR /app
+COPY target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                    }
+                }
+            }
+        }
+
+        stage('Parallel Build') {
+            parallel {
+                stage('Build Service A') {
+                    steps {
+                        dir('service-a') {
+                            script {
+                                echo "Building Service A with build type: ${params.BUILD_TYPE}"
+                                
+                                if (params.BUILD_TYPE == 'full') {
+                                    sh 'mvn clean install -DskipTests'
+                                } else {
+                                    sh 'mvn compile'
+                                }
+                                
+                                if (!params.SKIP_TESTS) {
+                                    sh 'mvn test'
+                                    junit '**/target/surefire-reports/*.xml'
+                                }
+                            }
+                        }
+                    }
+                }
+                stage('Build Service B') {
+                    steps {
+                        dir('service-b') {
+                            script {
+                                echo "Building Service B with build type: ${params.BUILD_TYPE}"
+                                
+                                if (params.BUILD_TYPE == 'full') {
+                                    sh 'mvn clean install -DskipTests'
+                                } else {
+                                    sh 'mvn compile'
+                                }
+                                
+                                if (!params.SKIP_TESTS) {
+                                    sh 'mvn test'
+                                    junit '**/target/surefire-reports/*.xml'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build & Push Images') {
+            parallel {
+                stage('Build & Push Image A') {
+                    steps {
+                        dir('service-a') {
+                            script {
+                                // Build Docker image
+                                sh "docker build -t ${env.DOCKER_IMAGE_A_FULL} ."
+                                
+                                // Push image if enabled
+                                if (params.PUSH_IMAGE) {
+                                    withCredentials([usernamePassword(
+                                        credentialsId: params.DOCKER_CREDS_ID,
+                                        usernameVariable: 'mooomoo7415369',
+                                        passwordVariable: 'Me5akoka@20momo'
+                                    )]) {
+                                        sh """
+                                            echo ${DOCKER_PASSWORD} | docker login -u ${mooomoo7415369} --password-stdin ${params.DOCKER_REGISTRY}
+                                            docker push ${env.DOCKER_IMAGE_A_FULL}
+                                            docker logout ${params.DOCKER_REGISTRY}
+                                        """
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                stage('Build & Push Image B') {
+                    steps {
+                        dir('service-b') {
+                            script {
+                                // Build Docker image
+                                sh "docker build -t ${env.DOCKER_IMAGE_B_FULL} ."
+                                
+                                // Push image if enabled
+                                if (params.PUSH_IMAGE) {
+                                    withCredentials([usernamePassword(
+                                        credentialsId: params.DOCKER_CREDS_ID,
+                                        usernameVariable: 'mooomoo7415369',
+                                        passwordVariable: 'Me5akoka@20momo'
+                                    )]) {
+                                        sh """
+                                            echo ${DOCKER_PASSWORD} | docker login -u ${mooomoo7415369} --password-stdin ${params.DOCKER_REGISTRY}
+                                            docker push ${env.DOCKER_IMAGE_B_FULL}
+                                            docker logout ${params.DOCKER_REGISTRY}
+                                        """
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "Cleaning up workspace and images"
+                cleanWs() // Clean workspace
+                
+                // Remove Docker images to save space
+                try {
+                    if (params.PUSH_IMAGE) {
+                        sh "docker rmi ${env.DOCKER_IMAGE_A_FULL} || true"
+                        sh "docker rmi ${env.DOCKER_IMAGE_B_FULL} || true"
+                    }
+                } catch (Exception e) {
+                    echo "Failed to remove images: ${e.message}"
+                }
+            }
+        }
+        success {
+            echo "Pipeline executed successfully for environment: ${params.DEPLOY_ENV}"
+            // Add success notifications here
+        }
+        failure {
+            echo "Pipeline failed for environment: ${params.DEPLOY_ENV}"
+            // Add failure notifications here
+        }
+    }
+}
