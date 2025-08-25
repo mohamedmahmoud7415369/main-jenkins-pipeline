@@ -1,27 +1,3 @@
-FROM ubuntu:20.04
-
-# Install prerequisites
-RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    curl \
-    git \
-    openssh-server \
-    openjdk-11-jdk \
-    maven \
-    docker.io
-
-# Install Docker (if not using docker.io)
-# RUN curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh
-
-# Create Jenkins user and add to Docker group
-RUN useradd -m -s /bin/bash jenkins && \
-    usermod -aG docker jenkins
-
-# Set Java and Maven environment variables
-ENV JAVA_HOME /usr/lib/jvm/java-11-openjdk-amd64
-ENV MAVEN_HOME /usr/share/maven
-ENV PATH $MAVEN_HOME/bin:$JAVA_HOME/bin:$PATH
-
-# Switch to Jenkins user
-USER jenkins
-WORKDIR /home/jenkins
+FROM openjdk:11
+COPY ./target/demo1-0.0.1-SNAPSHOT.jar demo1-0.0.1-SNAPSHOT.jar
+ENTRYPOINT ["java", "-jar", "demo1-0.0.1-SNAPSHOT.jar"]
